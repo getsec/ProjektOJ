@@ -1,0 +1,82 @@
+# serverless.yml
+
+service: serverless-flask
+
+plugins:
+  - serverless-python-requirements
+  - serverless-wsgi
+  - serverless-dynamodb-local
+
+custom:
+  tableName: 'cnc-${self:provider.stage}'
+  ssmParamName: CommandtoRun
+  wsgi:
+    app: app.app
+    packRequirements: false
+  pythonRequirements:
+    dockerizePip: non-linux
+  dynamodb:
+    start:
+      migrate: true
+    stages:
+      - dev
+
+provider:
+  #profile: personal
+  name: aws
+  runtime: python3.8
+  stage: dev
+  region: ca-central-1
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - ssm:*
+      Resource:
+        - { "Fn::GetAtt": ["UsersDynamoDBTable", "Arn" ] }
+        - arn:aws:ssm:*:*:parameter/*
+  environment:
+    USERS_TABLE: ${self:custom.tableName}
+    PARAM_NAME: ${self:custom.ssmParamName}
+
+functions:
+  app:
+    handler: wsgi.handler
+    events:
+      - http: ANY /
+      - http: 'ANY {proxy+}'
+
+resources:
+  Resources:
+    UsersDynamoDBTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: uuid
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: uuid
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:custom.tableName}
+    
+    SNSTopic:
+      Type: AWS::SNS::Topic
+      Properties: 
+        DisplayName: GetInstructions
+        TopicName: GetInstructions
+    CommandParam:
+      Type: AWS::SSM::Parameter
+      Properties: 
+        Name: CommandtoRun
+        Type: String
+        Value: whoami
